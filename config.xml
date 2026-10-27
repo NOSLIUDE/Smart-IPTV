@@ -8,7 +8,5 @@
     <allow-navigation href="*" />
     <allow-intent href="*" />
     <preference name="android-targetSdkVersion" value="33" />
-    <edit-config file="app/src/main/AndroidManifest.xml" mode="merge" target="/manifest/application">
-        <application android:usesCleartextTraffic="true" />
-    </edit-config>
+    <preference name="webContentsDebuggingEnabled" value="true" />
 </widget>
