@@ -1,0 +1,14 @@
+<?xml version='1.0' encoding='utf-8'?>
+<widget id="com.smarters.iptv" version="1.0.0" xmlns="http://www.w3.org/ns/widgets">
+    <name>SmartIPTV</name>
+    <description>Aplicativo IPTV para Android e Android TV</description>
+    <author email="dev@example.com">Smart IPTV</author>
+    <content src="index.html" />
+    <access origin="*" />
+    <allow-navigation href="*" />
+    <allow-intent href="*" />
+    <preference name="android-targetSdkVersion" value="33" />
+    <edit-config file="app/src/main/AndroidManifest.xml" mode="merge" target="/manifest/application">
+        <application android:usesCleartextTraffic="true" />
+    </edit-config>
+</widget>
