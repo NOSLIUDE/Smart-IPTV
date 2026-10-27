@@ -1,0 +1,871 @@
+<!DOCTYPE html>
+<html lang="pt-BR" class="h-full bg-slate-950">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>IPTV Smarters Pro - TV Edition</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        smarters: {
+                            blue: '#0d1b2a',
+                            card: '#1b263b',
+                            cardHover: '#2a3a5e',
+                            gold: '#f59e0b',
+                            goldHover: '#d97706',
+                            cyan: '#06b6d4',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- HLS.js for HLS Stream playback -->
+    <script src="https://cdn.jsdelivr.net/npm/hls.js@latest"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            user-select: none;
+            -webkit-user-select: none;
+            touch-action: manipulation;
+        }
+
+        /* Focus styles for Android TV D-Pad Navigation */
+        .tv-focusable:focus, .tv-focusable:focus-within {
+            outline: 3px solid #f59e0b !important;
+            outline-offset: 3px;
+            transform: scale(1.04);
+            z-index: 30;
+            box-shadow: 0 10px 25px -5px rgba(245, 158, 11, 0.4);
+        }
+
+        /* Smooth D-Pad transitions */
+        .tv-focusable {
+            transition: transform 0.15s ease-out, border-color 0.15s ease-out, box-shadow 0.15s ease-out;
+        }
+
+        /* Hide scrollbars for slick TV feel */
+        ::-webkit-scrollbar {
+            width: 0px;
+            height: 0px;
+            background: transparent;
+        }
+
+        .glass-panel {
+            background: rgba(27, 38, 59, 0.75);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 h-full flex flex-col overflow-hidden antialiased">
+
+    <!-- TOAST NOTIFICATION -->
+    <div id="toastNotification" class="fixed top-6 right-6 z-50 transform translate-x-full transition-transform duration-300 glass-panel border border-smarters-gold/40 text-slate-100 px-5 py-3 rounded-2xl shadow-2xl flex items-center gap-3 text-sm">
+        <i id="toastIcon" class="fa-solid fa-circle-info text-smarters-gold text-lg"></i>
+        <span id="toastMessage">Notificação do Sistema</span>
+    </div>
+
+    <!-- TOP HEADER / ACCOUNT STATUS BAR -->
+    <header class="bg-gradient-to-r from-slate-950 via-smarters-blue to-slate-950 border-b border-slate-800/80 px-6 py-3 flex items-center justify-between shrink-0 shadow-lg z-20">
+        <!-- Logo & Account Profile -->
+        <div class="flex items-center space-x-4">
+            <div class="bg-gradient-to-br from-smarters-gold to-amber-600 text-slate-950 font-black p-2.5 rounded-2xl flex items-center justify-center shadow-lg shadow-smarters-gold/20">
+                <i class="fa-solid fa-tv text-xl"></i>
+            </div>
+            <div>
+                <h1 class="font-extrabold text-lg leading-tight tracking-wide text-white">
+                    IPTV <span class="text-smarters-gold">SMARTERS</span> <span class="text-xs bg-smarters-cyan/20 text-smarters-cyan px-2 py-0.5 rounded-full border border-smarters-cyan/30 ml-1">PRO TV</span>
+                </h1>
+                <div id="activeProfileName" class="text-xs text-amber-400 font-semibold flex items-center gap-2 mt-0.5">
+                    <span class="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block animate-pulse" id="statusDot"></span>
+                    <span>Nenhum Perfil Selecionado</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard Account Info Badges -->
+        <div id="metricsPanel" class="hidden md:flex items-center gap-4 text-xs">
+            <div class="glass-panel px-4 py-2 rounded-xl flex items-center gap-3">
+                <i class="fa-solid fa-bolt text-smarters-gold text-base"></i>
+                <div>
+                    <span class="text-slate-400 block text-[10px] font-bold tracking-wider">LATÊNCIA</span>
+                    <span id="metricPing" class="font-bold text-slate-100">-- ms</span>
+                </div>
+            </div>
+            <div id="metricConnBox" class="glass-panel px-4 py-2 rounded-xl flex items-center gap-3">
+                <i class="fa-solid fa-users text-smarters-cyan text-base"></i>
+                <div>
+                    <span class="text-slate-400 block text-[10px] font-bold tracking-wider">CONEXÕES</span>
+                    <span id="metricConnections" class="font-bold text-slate-100">-- / --</span>
+                </div>
+            </div>
+            <div class="glass-panel px-4 py-2 rounded-xl flex items-center gap-3">
+                <i class="fa-solid fa-calendar-check text-emerald-400 text-base"></i>
+                <div>
+                    <span class="text-slate-400 block text-[10px] font-bold tracking-wider">VALIDADE</span>
+                    <span id="metricExpiry" class="font-bold text-slate-100">--</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Account / Switch Profile Button -->
+        <button tabindex="1" onclick="openProfileModal()" class="tv-focusable bg-gradient-to-r from-smarters-gold to-amber-600 hover:from-amber-500 hover:to-smarters-gold text-slate-950 font-bold text-xs px-4 py-2.5 rounded-xl flex items-center gap-2 shadow-lg shadow-smarters-gold/20 transition cursor-pointer">
+            <i class="fa-solid fa-user-gear"></i>
+            <span>Trocar / Importar Listas</span>
+        </button>
+    </header>
+
+    <!-- DASHBOARD VIEW (MAIN HOME SCREEN) -->
+    <main id="homeView" class="flex-1 p-6 md:p-10 overflow-y-auto flex flex-col justify-center">
+        
+        <!-- DASHBOARD HERO TITLE -->
+        <div class="mb-8 text-center md:text-left">
+            <h2 class="text-2xl md:text-3xl font-extrabold text-slate-100">O que você quer assistir hoje?</h2>
+            <p class="text-xs md:text-sm text-slate-400 mt-1">Navegue pelas categorias abaixo com o controle remoto ou toque na tela.</p>
+        </div>
+
+        <!-- MAIN CARDS (LIVE TV, MOVIES, SERIES) -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto w-full">
+            
+            <!-- LIVE TV CARD -->
+            <button tabindex="2" onclick="openCategoryView('tv')" class="tv-focusable group relative bg-gradient-to-br from-smarters-card to-slate-900 border border-slate-700/60 hover:border-smarters-gold rounded-3xl p-6 text-left flex flex-col justify-between h-56 md:h-64 shadow-2xl overflow-hidden cursor-pointer">
+                <div class="absolute -right-6 -bottom-6 text-slate-800/40 text-9xl group-hover:text-smarters-gold/10 transition duration-300">
+                    <i class="fa-solid fa-tv"></i>
+                </div>
+                <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-blue-600 to-indigo-600 flex items-center justify-center text-white text-2xl shadow-lg shadow-blue-500/30">
+                    <i class="fa-solid fa-tv"></i>
+                </div>
+                <div class="z-10">
+                    <span class="text-xs font-bold text-blue-400 tracking-wider uppercase">Transmissão Direta</span>
+                    <h3 class="text-2xl font-black text-white mt-1 group-hover:text-smarters-gold transition">TV AO VIVO</h3>
+                    <p id="countTv" class="text-xs text-slate-400 mt-1">0 Canais Carregados</p>
+                </div>
+            </button>
+
+            <!-- MOVIES CARD -->
+            <button tabindex="3" onclick="openCategoryView('movies')" class="tv-focusable group relative bg-gradient-to-br from-smarters-card to-slate-900 border border-slate-700/60 hover:border-smarters-gold rounded-3xl p-6 text-left flex flex-col justify-between h-56 md:h-64 shadow-2xl overflow-hidden cursor-pointer">
+                <div class="absolute -right-6 -bottom-6 text-slate-800/40 text-9xl group-hover:text-smarters-gold/10 transition duration-300">
+                    <i class="fa-solid fa-film"></i>
+                </div>
+                <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-500 to-smarters-gold flex items-center justify-center text-slate-950 text-2xl shadow-lg shadow-amber-500/30">
+                    <i class="fa-solid fa-film"></i>
+                </div>
+                <div class="z-10">
+                    <span class="text-xs font-bold text-smarters-gold tracking-wider uppercase">Catálogo On-Demand</span>
+                    <h3 class="text-2xl font-black text-white mt-1 group-hover:text-smarters-gold transition">FILMES</h3>
+                    <p id="countMovies" class="text-xs text-slate-400 mt-1">0 Filmes Carregados</p>
+                </div>
+            </button>
+
+            <!-- SERIES CARD -->
+            <button tabindex="4" onclick="openCategoryView('series')" class="tv-focusable group relative bg-gradient-to-br from-smarters-card to-slate-900 border border-slate-700/60 hover:border-smarters-gold rounded-3xl p-6 text-left flex flex-col justify-between h-56 md:h-64 shadow-2xl overflow-hidden cursor-pointer">
+                <div class="absolute -right-6 -bottom-6 text-slate-800/40 text-9xl group-hover:text-smarters-gold/10 transition duration-300">
+                    <i class="fa-solid fa-clapperboard"></i>
+                </div>
+                <div class="w-14 h-14 rounded-2xl bg-gradient-to-tr from-cyan-500 to-blue-500 flex items-center justify-center text-slate-950 text-2xl shadow-lg shadow-cyan-500/30">
+                    <i class="fa-solid fa-clapperboard"></i>
+                </div>
+                <div class="z-10">
+                    <span class="text-xs font-bold text-smarters-cyan tracking-wider uppercase">Temporadas & Episódios</span>
+                    <h3 class="text-2xl font-black text-white mt-1 group-hover:text-smarters-gold transition">SÉRIES</h3>
+                    <p id="countSeries" class="text-xs text-slate-400 mt-1">0 Séries Carregadas</p>
+                </div>
+            </button>
+
+        </div>
+    </main>
+
+    <!-- CONTENT EXPLORER VIEW (TV / MOVIES / SERIES LISTINGS) -->
+    <div id="contentExplorerView" class="hidden flex-1 flex flex-col overflow-hidden bg-slate-950">
+        <!-- TOP CATEGORY SUB-HEADER -->
+        <div class="px-6 py-4 border-b border-slate-800 bg-slate-900/80 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center space-x-4">
+                <button tabindex="10" onclick="backToHome()" class="tv-focusable bg-slate-800 hover:bg-slate-700 text-slate-200 p-2.5 rounded-xl flex items-center justify-center text-sm cursor-pointer">
+                    <i class="fa-solid fa-arrow-left mr-2"></i> Voltar ao Inicio
+                </button>
+                <h2 id="explorerTitle" class="text-lg font-extrabold text-smarters-gold uppercase tracking-wider">
+                    --
+                </h2>
+            </div>
+
+            <!-- SEARCH INPUT -->
+            <div class="relative w-full sm:w-80">
+                <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-3 text-slate-400 text-xs"></i>
+                <input type="text" id="searchInput" oninput="handleSearch()" placeholder="Buscar título..." 
+                    class="tv-focusable w-full bg-slate-800/90 border border-slate-700 text-slate-100 text-xs rounded-xl pl-9 pr-4 py-2.5 focus:outline-none placeholder-slate-500">
+            </div>
+        </div>
+
+        <!-- MAIN LAYOUT: SIDEBAR CATEGORIES & CONTENT GRID -->
+        <div class="flex-1 flex overflow-hidden">
+            <!-- CATEGORY SIDEBAR -->
+            <aside class="w-60 md:w-72 bg-slate-900/90 border-r border-slate-800 flex flex-col shrink-0 overflow-y-auto p-3 space-y-1" id="categoriesSidebar">
+                <!-- Dynamic categories -->
+            </aside>
+
+            <!-- CONTENT GRID AREA -->
+            <main class="flex-1 overflow-y-auto p-6 bg-slate-950">
+                <div id="explorerLoading" class="hidden h-full flex flex-col items-center justify-center text-slate-400">
+                    <div class="w-12 h-12 border-4 border-smarters-gold border-t-transparent rounded-full animate-spin mb-4"></div>
+                    <p class="text-xs font-bold animate-pulse text-slate-300">Carregando conteúdos do servidor...</p>
+                </div>
+
+                <div id="explorerGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-5">
+                    <!-- Dynamic Stream Cards -->
+                </div>
+            </main>
+        </div>
+    </div>
+
+    <!-- FULLSCREEN VIDEO PLAYER MODAL -->
+    <div id="playerModal" class="fixed inset-0 bg-black z-50 flex flex-col hidden">
+        <div class="relative w-full h-full flex items-center justify-center bg-black">
+            <video id="videoPlayer" class="w-full h-full object-contain" controls autoplay></video>
+            
+            <!-- CLOSE PLAYER BUTTON -->
+            <button tabindex="100" onclick="closePlayerModal()" class="tv-focusable absolute top-6 right-6 bg-slate-900/80 hover:bg-red-600 text-white w-12 h-12 rounded-full flex items-center justify-center text-lg backdrop-blur-md border border-slate-700/50 transition z-10 cursor-pointer">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+            <!-- SERIES EPISODES PANEL OVERLAY -->
+            <div id="seriesEpisodesPanel" class="hidden absolute left-6 top-6 bottom-6 w-80 md:w-96 glass-panel border border-slate-700/80 rounded-2xl p-4 flex flex-col z-20 shadow-2xl">
+                <h3 id="seriesPanelTitle" class="text-sm font-bold text-smarters-gold mb-3">Episódios da Série</h3>
+                <select id="seasonSelect" onchange="loadEpisodes()" class="tv-focusable bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl p-2.5 mb-3 focus:outline-none">
+                </select>
+                <div id="episodesList" class="flex-1 overflow-y-auto space-y-2 pr-1">
+                    <!-- Dynamic Episodes -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- PROFILE MANAGEMENT & TXT IMPORT MODAL -->
+    <div id="profileModal" class="fixed inset-0 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 z-50 hidden">
+        <div class="bg-smarters-blue border border-slate-800 rounded-3xl w-full max-w-xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/60">
+                <h3 class="text-base font-bold text-slate-100 flex items-center gap-2">
+                    <i class="fa-solid fa-users text-smarters-gold"></i> Gerenciador de Perfis e Arquivos TXT
+                </h3>
+                <button tabindex="200" onclick="closeProfileModal()" class="tv-focusable text-slate-400 hover:text-white text-lg p-1">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <div class="p-6 overflow-y-auto space-y-6">
+                <!-- IMPORT TXT FILE BOX -->
+                <div class="border-2 border-dashed border-slate-700 hover:border-smarters-gold rounded-2xl p-6 text-center transition bg-slate-900/40">
+                    <i class="fa-solid fa-file-arrow-up text-4xl text-smarters-gold mb-2"></i>
+                    <h4 class="text-sm font-bold text-slate-200">Importar Arquivo TXT de Listas</h4>
+                    <p class="text-xs text-slate-400 mt-1 max-w-sm mx-auto">Formatos aceitos: Xtream (<code class="text-smarters-gold">URL|USER|PASS|NOME</code>) ou M3U (<code class="text-smarters-gold">URL|NOME</code>).</p>
+                    
+                    <label tabindex="201" class="tv-focusable mt-4 inline-block bg-gradient-to-r from-smarters-gold to-amber-600 hover:from-amber-500 hover:to-smarters-gold text-slate-950 text-xs font-bold px-5 py-3 rounded-xl cursor-pointer transition shadow-lg shadow-smarters-gold/20">
+                        <span>Selecionar Arquivo .txt</span>
+                        <input type="file" id="txtFileInput" accept=".txt" class="hidden" onchange="handleFileUpload(event)">
+                    </label>
+                </div>
+
+                <!-- SAVED PROFILES LIST -->
+                <div>
+                    <h4 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Perfis Registrados</h4>
+                    <div id="profilesList" class="space-y-2 max-h-52 overflow-y-auto pr-1">
+                        <!-- Rendered Profiles -->
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-4 border-t border-slate-800 bg-slate-900/60 flex justify-end">
+                <button tabindex="210" onclick="closeProfileModal()" class="tv-focusable bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold px-5 py-2.5 rounded-xl transition">
+                    Fechar
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- MAIN APP JAVASCRIPT LOGIC -->
+    <script>
+        let profiles = [];
+        let activeProfile = null;
+        let activeType = 'tv'; // 'tv' | 'movies' | 'series'
+        let selectedCategoryId = 'ALL';
+        
+        let rawContentData = [];
+        let filteredContentData = [];
+        let categoriesList = [];
+        let hlsPlayer = null;
+
+        window.onload = function() {
+            loadSavedProfiles();
+            setupDPadNavigation();
+        };
+
+        // NOTIFICATION TOAST
+        function showNotification(message, type = 'info') {
+            const toast = document.getElementById('toastNotification');
+            const msg = document.getElementById('toastMessage');
+            const icon = document.getElementById('toastIcon');
+
+            msg.innerText = message;
+            if (type === 'error') {
+                icon.className = "fa-solid fa-circle-exclamation text-red-400 text-lg";
+            } else if (type === 'success') {
+                icon.className = "fa-solid fa-circle-check text-emerald-400 text-lg";
+            } else {
+                icon.className = "fa-solid fa-circle-info text-smarters-gold text-lg";
+            }
+
+            toast.classList.remove('translate-x-full');
+            setTimeout(() => {
+                toast.classList.add('translate-x-full');
+            }, 3500);
+        }
+
+        // MODAL CONTROLS
+        function openProfileModal() {
+            document.getElementById('profileModal').classList.remove('hidden');
+            renderProfilesList();
+        }
+
+        function closeProfileModal() {
+            document.getElementById('profileModal').classList.add('hidden');
+        }
+
+        // PARSE TXT LIST FILE
+        function handleFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                parseAndSaveTXT(e.target.result);
+            };
+            reader.readAsText(file);
+        }
+
+        function parseAndSaveTXT(content) {
+            const lines = content.split(/\r?\n/);
+            const newProfiles = [];
+
+            lines.forEach((line, index) => {
+                const trimmed = line.trim();
+                if (!trimmed || trimmed.startsWith('#')) return;
+
+                const parts = trimmed.split('|');
+
+                if (parts.length >= 3) {
+                    const url = parts[0].trim().replace(/\/$/, '');
+                    const username = parts[1].trim();
+                    const password = parts[2].trim();
+                    const name = parts[3] ? parts[3].trim() : `Xtream Perfil ${index + 1}`;
+
+                    newProfiles.push({
+                        id: 'prof_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+                        type: 'xtream',
+                        name: name,
+                        url: url,
+                        username: username,
+                        password: password
+                    });
+                } else if (parts.length >= 1 && (parts[0].startsWith('http://') || parts[0].startsWith('https://'))) {
+                    const url = parts[0].trim();
+                    const name = parts[1] ? parts[1].trim() : `Lista M3U ${index + 1}`;
+
+                    newProfiles.push({
+                        id: 'prof_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+                        type: 'm3u',
+                        name: name,
+                        url: url
+                    });
+                }
+            });
+
+            if (newProfiles.length > 0) {
+                profiles = [...profiles, ...newProfiles];
+                saveProfilesToStorage();
+                renderProfilesList();
+                showNotification(`${newProfiles.length} lista(s) importada(s) com sucesso!`, 'success');
+                if (!activeProfile) {
+                    selectProfile(newProfiles[0].id);
+                }
+            } else {
+                showNotification('Nenhum formato válido encontrado no TXT.', 'error');
+            }
+        }
+
+        function saveProfilesToStorage() {
+            localStorage.setItem('smarters_tv_profiles', JSON.stringify(profiles));
+        }
+
+        function loadSavedProfiles() {
+            const stored = localStorage.getItem('smarters_tv_profiles');
+            if (stored) {
+                try {
+                    profiles = JSON.parse(stored);
+                    if (profiles.length > 0) {
+                        selectProfile(profiles[0].id);
+                    }
+                } catch(e) {
+                    profiles = [];
+                }
+            }
+        }
+
+        function renderProfilesList() {
+            const container = document.getElementById('profilesList');
+            if (profiles.length === 0) {
+                container.innerHTML = `<p class="text-xs text-slate-500 py-3 text-center">Nenhuma lista cadastrada.</p>`;
+                return;
+            }
+
+            container.innerHTML = profiles.map(p => `
+                <div class="flex items-center justify-between p-3 rounded-2xl bg-slate-900/80 border ${activeProfile && activeProfile.id === p.id ? 'border-smarters-gold bg-smarters-gold/10' : 'border-slate-800'} transition">
+                    <div class="flex items-center gap-3">
+                        <div class="w-9 h-9 rounded-xl ${p.type === 'xtream' ? 'bg-indigo-600/30 text-indigo-400 border border-indigo-500/30' : 'bg-emerald-600/30 text-emerald-400 border border-emerald-500/30'} flex items-center justify-center text-xs font-bold">
+                            ${p.type === 'xtream' ? 'XC' : 'M3U'}
+                        </div>
+                        <div>
+                            <h5 class="text-xs font-bold text-slate-100">${p.name}</h5>
+                            <p class="text-[10px] text-slate-400">${p.type === 'xtream' ? p.url : 'M3U URL'}</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <button tabindex="220" onclick="selectProfile('${p.id}')" class="tv-focusable bg-smarters-gold hover:bg-amber-600 text-slate-950 text-xs font-bold px-3 py-1.5 rounded-lg transition">
+                            ${activeProfile && activeProfile.id === p.id ? 'Ativo' : 'Carregar'}
+                        </button>
+                        <button tabindex="221" onclick="deleteProfile('${p.id}')" class="tv-focusable text-slate-400 hover:text-red-400 text-xs p-1.5 transition">
+                            <i class="fa-solid fa-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function deleteProfile(id) {
+            profiles = profiles.filter(p => p.id !== id);
+            saveProfilesToStorage();
+            if (activeProfile && activeProfile.id === id) {
+                activeProfile = null;
+                document.getElementById('activeProfileName').innerHTML = `<span class="w-2.5 h-2.5 rounded-full bg-slate-500 inline-block"></span> <span>Nenhum Perfil Selecionado</span>`;
+                document.getElementById('metricsPanel').classList.add('hidden');
+            }
+            renderProfilesList();
+        }
+
+        async function selectProfile(id) {
+            const prof = profiles.find(p => p.id === id);
+            if (!prof) return;
+
+            activeProfile = prof;
+            document.getElementById('activeProfileName').innerHTML = `
+                <span class="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span> <span>${prof.name}</span>
+            `;
+
+            closeProfileModal();
+
+            const startTime = Date.now();
+            if (prof.type === 'xtream') {
+                await fetchXtreamAccountData(prof, startTime);
+            } else {
+                await fetchM3UPlaylistData(prof, startTime);
+            }
+        }
+
+        // FETCH XTREAM USER DATA & METRICS
+        async function fetchXtreamAccountData(prof, startTime) {
+            const apiUrl = `${prof.url}/player_api.php?username=${prof.username}&password=${prof.password}`;
+
+            try {
+                const response = await fetch(apiUrl);
+                const ping = Date.now() - startTime;
+                document.getElementById('metricPing').innerText = `${ping} ms`;
+                document.getElementById('metricsPanel').classList.remove('hidden');
+
+                const data = await response.json();
+
+                if (data.user_info) {
+                    const info = data.user_info;
+                    document.getElementById('metricConnections').innerText = `${info.active_cons || 0} / ${info.max_connections || '1'}`;
+                    
+                    if (info.exp_date && info.exp_date !== "null") {
+                        const expDate = new Date(parseInt(info.exp_date) * 1000);
+                        document.getElementById('metricExpiry').innerText = expDate.toLocaleDateString();
+                    } else {
+                        document.getElementById('metricExpiry').innerText = 'Ilimitado';
+                    }
+                }
+
+                showNotification("Conectado ao servidor Xtream!", 'success');
+            } catch (error) {
+                console.error("Erro Xtream API:", error);
+                showNotification("Erro de conexão com a API do Xtream.", 'error');
+            }
+        }
+
+        // FETCH M3U DATA
+        async function fetchM3UPlaylistData(prof, startTime) {
+            try {
+                const res = await fetch(prof.url);
+                const ping = Date.now() - startTime;
+                document.getElementById('metricPing').innerText = `${ping} ms`;
+                document.getElementById('metricExpiry').innerText = 'M3U Lista';
+                document.getElementById('metricConnBox').classList.add('hidden');
+                document.getElementById('metricsPanel').classList.remove('hidden');
+
+                showNotification("Lista M3U carregada com sucesso!", 'success');
+            } catch (err) {
+                showNotification("Erro ao carregar lista M3U.", 'error');
+            }
+        }
+
+        // OPEN EXPLORER VIEW FOR TV, MOVIES OR SERIES
+        async function openCategoryView(type) {
+            if (!activeProfile) {
+                openProfileModal();
+                showNotification("Por favor, selecione ou importe um perfil de lista.", 'info');
+                return;
+            }
+
+            activeType = type;
+            selectedCategoryId = 'ALL';
+
+            document.getElementById('homeView').classList.add('hidden');
+            document.getElementById('contentExplorerView').classList.remove('hidden');
+
+            const titleMap = { tv: 'TV ao Vivo', movies: 'Filmes', series: 'Séries' };
+            document.getElementById('explorerTitle').innerText = titleMap[type];
+
+            if (activeProfile.type === 'xtream') {
+                await loadXtreamContent(type);
+            } else {
+                await loadM3UContent();
+            }
+        }
+
+        function backToHome() {
+            document.getElementById('contentExplorerView').classList.add('hidden');
+            document.getElementById('homeView').classList.remove('hidden');
+        }
+
+        // LOAD CONTENT FROM XTREAM API
+        async function loadXtreamContent(type) {
+            showExplorerLoading(true);
+
+            let action = 'get_live_streams';
+            let catAction = 'get_live_categories';
+            if (type === 'movies') { action = 'get_vod_streams'; catAction = 'get_vod_categories'; }
+            if (type === 'series') { action = 'get_series'; catAction = 'get_series_categories'; }
+
+            try {
+                // Fetch Categories
+                const catRes = await fetch(`${activeProfile.url}/player_api.php?username=${activeProfile.username}&password=${activeProfile.password}&action=${catAction}`);
+                categoriesList = await catRes.json();
+
+                // Fetch Stream Items
+                const res = await fetch(`${activeProfile.url}/player_api.php?username=${activeProfile.username}&password=${activeProfile.password}&action=${action}`);
+                const data = await res.json();
+
+                rawContentData = data.map(item => ({
+                    id: item.stream_id || item.series_id,
+                    name: item.name,
+                    icon: item.stream_icon || item.cover,
+                    categoryId: item.category_id,
+                    type: type,
+                    raw: item
+                }));
+
+                renderSidebarCategories();
+                filterContent();
+
+            } catch (err) {
+                console.error("Erro ao carregar itens:", err);
+                showNotification("Falha ao carregar conteúdos.", 'error');
+            } finally {
+                showExplorerLoading(false);
+            }
+        }
+
+        // LOAD CONTENT FROM M3U
+        async function loadM3UContent() {
+            showExplorerLoading(true);
+
+            try {
+                const res = await fetch(activeProfile.url);
+                const text = await res.text();
+
+                const lines = text.split('\n');
+                const items = [];
+                const catSet = new Set();
+                let currentItem = {};
+
+                lines.forEach(line => {
+                    line = line.trim();
+                    if (line.startsWith('#EXTINF:')) {
+                        const nameMatch = line.match(/,(.+)$/);
+                        const groupMatch = line.match(/group-title="([^"]+)"/);
+                        const logoMatch = line.match(/tvg-logo="([^"]+)"/);
+
+                        currentItem = {
+                            name: nameMatch ? nameMatch[1] : 'Sem Nome',
+                            categoryName: groupMatch ? groupMatch[1] : 'Geral',
+                            icon: logoMatch ? logoMatch[1] : '',
+                        };
+                        if (currentItem.categoryName) catSet.add(currentItem.categoryName);
+                    } else if (line.startsWith('http://') || line.startsWith('https://')) {
+                        currentItem.streamUrl = line;
+                        currentItem.id = Math.random().toString(36).substr(2, 9);
+                        currentItem.type = 'tv';
+                        items.push({...currentItem});
+                        currentItem = {};
+                    }
+                });
+
+                rawContentData = items;
+                categoriesList = Array.from(catSet).map(cat => ({ category_id: cat, category_name: cat }));
+
+                renderSidebarCategories(true);
+                filterContent();
+
+            } catch (err) {
+                showNotification("Erro no processamento da M3U.", 'error');
+            } finally {
+                showExplorerLoading(false);
+            }
+        }
+
+        function renderSidebarCategories(isM3U = false) {
+            const sidebar = document.getElementById('categoriesSidebar');
+            
+            let html = `
+                <button tabindex="300" onclick="selectCategory('ALL')" class="tv-focusable w-full text-left px-4 py-3 rounded-xl text-xs font-bold transition cursor-pointer ${selectedCategoryId === 'ALL' ? 'bg-smarters-gold text-slate-950' : 'text-slate-300 hover:bg-slate-800'}">
+                    Todas as Categorias
+                </button>
+            `;
+
+            categoriesList.forEach((cat, idx) => {
+                const id = isM3U ? cat.category_name : cat.category_id;
+                const name = cat.category_name;
+                const isSelected = selectedCategoryId == id;
+
+                html += `
+                    <button tabindex="${301 + idx}" onclick="selectCategory('${id}')" class="tv-focusable w-full text-left px-4 py-3 rounded-xl text-xs font-bold transition cursor-pointer ${isSelected ? 'bg-smarters-gold text-slate-950' : 'text-slate-300 hover:bg-slate-800'}">
+                        ${name}
+                    </button>
+                `;
+            });
+
+            sidebar.innerHTML = html;
+        }
+
+        function selectCategory(catId) {
+            selectedCategoryId = catId;
+            renderSidebarCategories(activeProfile.type === 'm3u');
+            filterContent();
+        }
+
+        function filterContent() {
+            const search = document.getElementById('searchInput').value.toLowerCase();
+
+            filteredContentData = rawContentData.filter(item => {
+                const matchesCat = (selectedCategoryId === 'ALL') || 
+                                   (item.categoryId == selectedCategoryId) || 
+                                   (item.categoryName === selectedCategoryId);
+                const matchesSearch = item.name.toLowerCase().includes(search);
+                return matchesCat && matchesSearch;
+            });
+
+            renderGrid();
+        }
+
+        function handleSearch() {
+            filterContent();
+        }
+
+        function renderGrid() {
+            const grid = document.getElementById('explorerGrid');
+
+            if (filteredContentData.length === 0) {
+                grid.innerHTML = `<p class="col-span-full text-center text-xs text-slate-500 py-16">Nenhum conteúdo encontrado nesta categoria.</p>`;
+                return;
+            }
+
+            const isPoster = activeType !== 'tv';
+            const aspectClass = isPoster ? 'aspect-[2/3]' : 'aspect-video';
+            const placeholder = 'https://placehold.co/300x450/1b263b/f59e0b?text=Sem+Capa';
+
+            grid.innerHTML = filteredContentData.map((item, idx) => `
+                <button tabindex="${500 + idx}" onclick="playItem('${item.id}')" class="tv-focusable group bg-slate-900 border border-slate-800/80 rounded-2xl overflow-hidden text-left hover:border-smarters-gold transition flex flex-col cursor-pointer">
+                    <div class="${aspectClass} bg-slate-950 relative overflow-hidden flex items-center justify-center">
+                        <img src="${item.icon || placeholder}" onerror="this.src='${placeholder}'" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" loading="lazy">
+                        <div class="absolute inset-0 bg-slate-950/40 opacity-0 group-hover:opacity-100 transition flex items-center justify-center">
+                            <div class="w-10 h-10 rounded-full bg-smarters-gold text-slate-950 flex items-center justify-center text-sm shadow-xl">
+                                <i class="fa-solid fa-play ml-0.5"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="p-3 flex-1 flex flex-col justify-between">
+                        <h4 class="text-xs font-bold text-slate-100 line-clamp-1 group-hover:text-smarters-gold transition">${item.name}</h4>
+                    </div>
+                </button>
+            `).join('');
+        }
+
+        // PLAYBACK SYSTEM
+        async function playItem(itemId) {
+            const item = rawContentData.find(i => i.id == itemId);
+            if (!item) return;
+
+            const modal = document.getElementById('playerModal');
+            const video = document.getElementById('videoPlayer');
+            const episodesPanel = document.getElementById('seriesEpisodesPanel');
+
+            modal.classList.remove('hidden');
+            episodesPanel.classList.add('hidden');
+
+            let streamUrl = '';
+
+            if (activeProfile.type === 'xtream') {
+                if (item.type === 'tv') {
+                    streamUrl = `${activeProfile.url}/live/${activeProfile.username}/${activeProfile.password}/${item.id}.m3u8`;
+                } else if (item.type === 'movies') {
+                    const ext = item.raw.container_extension || 'mp4';
+                    streamUrl = `${activeProfile.url}/movie/${activeProfile.username}/${activeProfile.password}/${item.id}.${ext}`;
+                } else if (item.type === 'series') {
+                    fetchSeriesEpisodes(item.id);
+                    return;
+                }
+            } else {
+                streamUrl = item.streamUrl;
+            }
+
+            initHls(streamUrl, video);
+        }
+
+        async function fetchSeriesEpisodes(seriesId) {
+            const episodesPanel = document.getElementById('seriesEpisodesPanel');
+            episodesPanel.classList.remove('hidden');
+
+            try {
+                const res = await fetch(`${activeProfile.url}/player_api.php?username=${activeProfile.username}&password=${activeProfile.password}&action=get_series_info&series_id=${seriesId}`);
+                const data = await res.json();
+
+                const seasons = data.episodes;
+                const seasonSelect = document.getElementById('seasonSelect');
+                seasonSelect.innerHTML = '';
+
+                Object.keys(seasons).forEach(sNum => {
+                    seasonSelect.innerHTML += `<option value="${sNum}">Temporada ${sNum}</option>`;
+                });
+
+                window.currentSeriesEpisodes = seasons;
+                loadEpisodes();
+
+            } catch (err) {
+                console.error("Erro série:", err);
+            }
+        }
+
+        function loadEpisodes() {
+            const seasonNum = document.getElementById('seasonSelect').value;
+            const episodes = window.currentSeriesEpisodes[seasonNum] || [];
+            const container = document.getElementById('episodesList');
+
+            container.innerHTML = episodes.map((ep, idx) => `
+                <button tabindex="${1000 + idx}" onclick="playEpisode('${ep.id}', '${ep.container_extension}')" class="tv-focusable w-full text-left p-3 rounded-xl bg-slate-800/80 hover:bg-smarters-gold/20 border border-slate-700/60 text-xs text-slate-100 transition flex items-center justify-between cursor-pointer">
+                    <span>E${ep.episode_num} - ${ep.title}</span>
+                    <i class="fa-solid fa-play text-smarters-gold"></i>
+                </button>
+            `).join('');
+        }
+
+        function playEpisode(epId, ext = 'mp4') {
+            const video = document.getElementById('videoPlayer');
+            const streamUrl = `${activeProfile.url}/series/${activeProfile.username}/${activeProfile.password}/${epId}.${ext}`;
+            initHls(streamUrl, video);
+        }
+
+        function initHls(url, videoElement) {
+            if (hlsPlayer) {
+                hlsPlayer.destroy();
+            }
+
+            if (Hls.isSupported() && (url.includes('.m3u8') || url.includes('.ts'))) {
+                hlsPlayer = new Hls();
+                hlsPlayer.loadSource(url);
+                hlsPlayer.attachMedia(videoElement);
+                hlsPlayer.on(Hls.Events.MANIFEST_PARSED, function () {
+                    videoElement.play();
+                });
+            } else {
+                videoElement.src = url;
+                videoElement.play();
+            }
+        }
+
+        function closePlayerModal() {
+            const video = document.getElementById('videoPlayer');
+            video.pause();
+            video.src = '';
+            if (hlsPlayer) hlsPlayer.destroy();
+            document.getElementById('playerModal').classList.add('hidden');
+        }
+
+        function showExplorerLoading(show) {
+            const spinner = document.getElementById('explorerLoading');
+            const grid = document.getElementById('explorerGrid');
+
+            if (show) {
+                spinner.classList.remove('hidden');
+                grid.classList.add('hidden');
+            } else {
+                spinner.classList.add('hidden');
+                grid.classList.remove('hidden');
+            }
+        }
+
+        // TV CONTROL / D-PAD NAVIGATION SYSTEM
+        function setupDPadNavigation() {
+            document.addEventListener('keydown', function(e) {
+                const focusable = Array.from(document.querySelectorAll('.tv-focusable:not(.hidden)'));
+                if (focusable.length === 0) return;
+
+                const active = document.activeElement;
+                let currentIndex = focusable.indexOf(active);
+
+                if (currentIndex === -1) {
+                    focusable[0].focus();
+                    return;
+                }
+
+                switch (e.key) {
+                    case 'ArrowRight':
+                        if (currentIndex < focusable.length - 1) focusable[currentIndex + 1].focus();
+                        break;
+                    case 'ArrowLeft':
+                        if (currentIndex > 0) focusable[currentIndex - 1].focus();
+                        break;
+                    case 'ArrowDown':
+                        if (currentIndex + 3 < focusable.length) focusable[currentIndex + 3].focus();
+                        break;
+                    case 'ArrowUp':
+                        if (currentIndex - 3 >= 0) focusable[currentIndex - 3].focus();
+                        break;
+                    case 'Escape':
+                    case 'BackSpace':
+                        closePlayerModal();
+                        closeProfileModal();
+                        break;
+                }
+            });
+        }
+    </script>
+</body>
+</html>
