@@ -1,0 +1,1148 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IPTV Hero Player Pro - TV</title>
+
+    <!-- ============================================================
+         BLINDAGEM: restaura addEventListener nativo se algo sobrescrever
+         (executa ANTES de qualquer outro script)
+         ============================================================ -->
+    <script>
+        (function () {
+            try {
+                const nativeAdd = EventTarget.prototype.addEventListener;
+                if (typeof document.addEventListener !== 'function') {
+                    document.addEventListener = nativeAdd;
+                }
+                // Impede sobrescrita por extensões/players externos
+                Object.defineProperty(document, 'addEventListener', {
+                    get: function () { return nativeAdd; },
+                    set: function () { /* ignora */ },
+                    configurable: true
+                });
+            } catch (_) {}
+        })();
+    </script>
+
+    <!-- ============================================================
+         PLAYERS LOCAIS (sem CDN → sem Tracking Prevention)
+         ============================================================ -->
+    <script src="./hls.min.js"></script>
+    <script src="./dash.all.min.js"></script>
+
+    <!-- ============================================================
+         FALLBACK: se os arquivos locais não carregarem, o app não quebra
+         ============================================================ -->
+    <script>
+        if (typeof Hls === 'undefined') {
+            console.warn('[HLS] hls.min.js não encontrado — usando fallback.');
+            window.Hls = {
+                isSupported: () => false,
+                Events: { MANIFEST_PARSED: 'x', ERROR: 'x' },
+                prototype: { destroy() {}, loadSource() {}, attachMedia() {}, on() {} }
+            };
+        }
+        if (typeof dashjs === 'undefined') {
+            console.warn('[DASH] dash.all.min.js não encontrado.');
+            window.dashjs = null;
+        }
+    </script>
+
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        :focus { outline: none; }
+        .focusable:focus, .focusable:focus-visible {
+            outline: 3px solid #facc15 !important;
+            outline-offset: 2px;
+            box-shadow: 0 0 0 6px rgba(250, 204, 21, 0.25);
+            border-radius: 6px; z-index: 10;
+        }
+        .channel-item:focus { background: #334155; }
+        .channel-item:focus.active, .channel-item.active:focus { background: #0ea5e9; }
+
+        header { background: #1e293b; padding: 8px 16px; border-bottom: 1px solid #334155; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; position: relative; }
+        header h1 { font-size: 1.1rem; color: #38bdf8; white-space: nowrap; }
+        .header-right { display: flex; align-items: center; gap: 10px; margin-left: auto; }
+        .proxy-indicator { font-size: 0.7rem; padding: 3px 8px; border-radius: 4px; background: #334155; color: #94a3b8; cursor: pointer; }
+        .proxy-indicator.active { background: #16a34a; color: white; }
+        .proxy-indicator.warning { background: #d97706; color: white; }
+        .proxy-indicator.danger { background: #dc2626; color: white; }
+
+        .user-menu-btn { display: flex; align-items: center; gap: 8px; background: #334155; padding: 4px 12px 4px 6px; border-radius: 20px; cursor: pointer; border: none; color: #e2e8f0; font-size: 0.8rem; font-weight: 600; }
+        .user-menu-btn:hover, .user-menu-btn:focus { background: #475569; }
+        .user-avatar { width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg, #7c3aed, #38bdf8); display: flex; align-items: center; justify-content: center; font-size: 0.9rem; }
+        .user-menu-panel { position: absolute; top: 100%; right: 12px; margin-top: 6px; background: #1e293b; border: 1px solid #334155; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); min-width: 380px; max-width: 95vw; z-index: 1000; display: none; }
+        .user-menu-panel.open { display: block; }
+        .user-menu-header { padding: 12px 16px; border-bottom: 1px solid #334155; display: flex; justify-content: space-between; align-items: center; }
+        .user-menu-header h3 { font-size: 0.85rem; color: #94a3b8; text-transform: uppercase; }
+        .user-menu-body { max-height: 450px; overflow-y: auto; padding: 8px; }
+        .profile-item { padding: 10px; border-radius: 6px; margin-bottom: 4px; cursor: pointer; border: 1px solid transparent; }
+        .profile-item:hover, .profile-item:focus { background: #334155; }
+        .profile-item.active { background: #0f172a; border-color: #38bdf8; }
+        .profile-top { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+        .profile-hero { font-weight: 700; color: #a78bfa; font-size: 0.9rem; }
+        .profile-badge { font-size: 0.6rem; padding: 2px 6px; border-radius: 3px; font-weight: 600; }
+        .badge-valid { background: #16a34a; color: white; }
+        .badge-expired { background: #dc2626; color: white; }
+        .badge-unknown { background: #475569; color: #e2e8f0; }
+        .badge-bulk { background: #7c3aed; color: white; }
+        .profile-meta { font-size: 0.7rem; color: #94a3b8; display: flex; gap: 8px; flex-wrap: wrap; }
+        .profile-actions { display: flex; gap: 4px; margin-top: 6px; }
+        .profile-actions button { padding: 3px 8px; font-size: 0.7rem; border-radius: 3px; border: none; cursor: pointer; background: #475569; color: #e2e8f0; }
+        .profile-actions button.danger { background: #dc2626; color: white; }
+        .user-menu-footer { padding: 10px 16px; border-top: 1px solid #334155; display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+        .user-menu-footer button { padding: 4px 10px; font-size: 0.7rem; border-radius: 4px; border: none; cursor: pointer; background: #475569; color: #e2e8f0; }
+        .user-menu-footer button.danger { background: #dc2626; color: white; }
+        .empty-profiles { padding: 20px; text-align: center; color: #64748b; font-size: 0.8rem; }
+
+        .tabs { display: flex; background: #1e293b; padding: 0 16px; border-bottom: 1px solid #334155; overflow-x: auto; }
+        .tab { padding: 10px 16px; background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 0.85rem; font-weight: 600; border-bottom: 2px solid transparent; white-space: nowrap; }
+        .tab:hover, .tab:focus { color: #e2e8f0; background: #334155; }
+        .tab.active { color: #38bdf8; border-bottom-color: #38bdf8; }
+
+        .tab-panel { display: none; padding: 10px 16px; background: #1e293b; border-bottom: 1px solid #334155; gap: 8px; align-items: center; flex-wrap: wrap; }
+        .tab-panel.active { display: flex; }
+        .tab-panel input { padding: 6px 10px; border-radius: 4px; border: 1px solid #475569; background: #0f172a; color: #e2e8f0; font-size: 0.85rem; }
+        .tab-panel button { padding: 6px 14px; border-radius: 4px; border: none; background: #38bdf8; color: #0f172a; font-weight: 600; cursor: pointer; font-size: 0.85rem; }
+        .tab-panel button.secondary { background: #475569; color: #e2e8f0; }
+        .tab-panel button.danger { background: #dc2626; color: white; }
+        .hint { font-size: 0.75rem; color: #94a3b8; width: 100%; }
+        .hint.warn { color: #fbbf24; }
+        .bulk-counter { font-size: 0.75rem; color: #a78bfa; font-weight: 600; }
+
+        main { display: flex; flex: 1; overflow: hidden; }
+        aside { width: 340px; background: #1e293b; border-right: 1px solid #334155; display: flex; flex-direction: column; }
+        .content-tabs { display: flex; border-bottom: 1px solid #334155; }
+        .content-tab { flex: 1; padding: 10px; background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 0.8rem; font-weight: 600; border-bottom: 2px solid transparent; }
+        .content-tab.active { color: #38bdf8; border-bottom-color: #38bdf8; background: #0f172a; }
+        .category-select { padding: 8px; border-bottom: 1px solid #334155; }
+        .category-select select { width: 100%; padding: 6px; border-radius: 4px; background: #0f172a; color: #e2e8f0; border: 1px solid #475569; }
+        #channel-list { flex: 1; overflow-y: auto; padding: 8px; scroll-behavior: smooth; }
+        .channel-item { padding: 8px 10px; border-radius: 4px; cursor: pointer; margin-bottom: 2px; display: flex; align-items: center; gap: 8px; font-size: 0.85rem; }
+        .channel-item:hover { background: #334155; }
+        .channel-item.active { background: #0ea5e9; color: #0f172a; font-weight: 600; }
+        .badge { font-size: 0.6rem; background: #7c3aed; color: white; padding: 1px 5px; border-radius: 3px; margin-left: auto; }
+
+        .video-area { flex: 1; display: flex; flex-direction: column; background: #000; position: relative; }
+        #video-container { flex: 1; display: flex; align-items: center; justify-content: center; position: relative; }
+        #video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+        #status-overlay { position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.85); padding: 6px 12px; border-radius: 4px; font-size: 0.75rem; color: #e2e8f0; max-width: 90%; }
+        #status-overlay.error { background: rgba(220,38,38,0.9); }
+        #status-overlay.warn  { background: rgba(217,119,6,0.9); }
+        #status-overlay.ok    { background: rgba(22,163,74,0.9); }
+        .controls { background: #1e293b; padding: 8px 12px; display: flex; gap: 10px; align-items: center; border-top: 1px solid #334155; font-size: 0.85rem; }
+        .conn-badge { display: inline-flex; align-items: center; gap: 4px; font-size: 0.7rem; color: #94a3b8; }
+        .conn-dot { width: 6px; height: 6px; border-radius: 50%; background: #16a34a; animation: pulse 2s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+        .fullscreen-btn { padding: 6px 14px; border-radius: 4px; border: none; background: #38bdf8; color: #0f172a; font-weight: 600; cursor: pointer; font-size: 0.85rem; }
+        body.video-fullscreen header, body.video-fullscreen .tabs, body.video-fullscreen .tab-panel,
+        body.video-fullscreen aside, body.video-fullscreen .controls { display: none !important; }
+        body.video-fullscreen main { display: block; }
+        body.video-fullscreen .video-area, body.video-fullscreen #video-container { width: 100vw; height: 100vh; }
+        body.video-fullscreen #status-overlay { display: none; }
+        body.video-fullscreen .exit-fs-hint {
+            position: fixed; top: 20px; right: 20px; background: rgba(0,0,0,0.8); color: white;
+            padding: 8px 16px; border-radius: 8px; font-size: 0.85rem; z-index: 9999;
+            opacity: 0; transition: opacity 0.3s; pointer-events: none;
+        }
+        body.video-fullscreen .exit-fs-hint.show { opacity: 1; }
+
+        .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.85); z-index: 2000; display: none; align-items: center; justify-content: center; padding: 20px; }
+        .modal-overlay.open { display: flex; }
+        .modal-box { background: #1e293b; border-radius: 10px; padding: 24px; max-width: 500px; width: 100%; border: 1px solid #334155; }
+        .modal-box h2 { font-size: 1.1rem; color: #38bdf8; margin-bottom: 12px; }
+        .modal-box p { font-size: 0.85rem; color: #94a3b8; margin-bottom: 12px; line-height: 1.5; }
+        .modal-box .progress-bar { height: 8px; background: #334155; border-radius: 4px; overflow: hidden; margin: 12px 0; }
+        .modal-box .progress-fill { height: 100%; background: linear-gradient(90deg, #38bdf8, #7c3aed); }
+        .modal-box .log { max-height: 150px; overflow-y: auto; background: #0f172a; border-radius: 6px; padding: 8px; font-size: 0.7rem; color: #94a3b8; font-family: monospace; margin-bottom: 12px; }
+        .modal-box button { width: 100%; padding: 10px; border-radius: 6px; border: none; background: #38bdf8; color: #0f172a; font-weight: 700; cursor: pointer; margin-top: 8px; }
+        .modal-box button.secondary { background: #475569; color: #e2e8f0; }
+        .modal-box button.danger { background: #dc2626; color: white; }
+    </style>
+</head>
+<body>
+
+<header>
+    <h1>🎬 IPTV Hero Pro TV</h1>
+    <div class="header-right">
+        <button class="fullscreen-btn focusable" onclick="toggleFullscreen()" title="Tela Cheia (F)">⛶ Tela Cheia</button>
+        <span id="proxy-indicator" class="proxy-indicator focusable" tabindex="0" onclick="switchTab('tab-proxy')">Proxy: desativado</span>
+        <button class="user-menu-btn focusable" onclick="toggleUserMenu(event)">
+            <span class="user-avatar" id="current-avatar">👤</span>
+            <span id="current-profile-name">Nenhum perfil</span>
+            <span style="font-size:0.7rem;">▼</span>
+        </button>
+    </div>
+    <div class="user-menu-panel" id="user-menu-panel">
+        <div class="user-menu-header">
+            <h3>👤 Perfis / Listas</h3>
+            <span id="profile-count" style="font-size:0.7rem;color:#64748b;">0 perfis</span>
+        </div>
+        <div class="user-menu-body" id="profile-list">
+            <div class="empty-profiles">Nenhum perfil criado ainda.</div>
+        </div>
+        <div class="user-menu-footer">
+            <button class="focusable" onclick="exportProfilesTXT()">📤 Exportar TXT</button>
+            <button class="focusable" onclick="document.getElementById('bulk-file').click()">📥 Importar Lote</button>
+            <button class="focusable danger" onclick="deleteAllProfiles()">🗑️ Limpar Tudo</button>
+        </div>
+    </div>
+</header>
+
+<div class="tabs">
+    <button class="tab focusable active" data-tab="tab-url" onclick="switchTab('tab-url')">🌐 URL M3U</button>
+    <button class="tab focusable" data-tab="tab-file" onclick="switchTab('tab-file')">📂 Arquivo Local</button>
+    <button class="tab focusable" data-tab="tab-bulk" onclick="switchTab('tab-bulk')">📚 Lote (1000)</button>
+    <button class="tab focusable" data-tab="tab-xtream" onclick="switchTab('tab-xtream')">🔑 Xtream</button>
+    <button class="tab focusable" data-tab="tab-proxy" onclick="switchTab('tab-proxy')">🛡️ Proxy</button>
+</div>
+
+<div class="tab-panel active" id="tab-url">
+    <input type="text" class="focusable" id="m3u-url" placeholder="http://servidor:8080/get.php?username=...&type=m3u" style="flex:1;min-width:250px;">
+    <button class="focusable" onclick="loadFromUrl()">Carregar</button>
+</div>
+
+<div class="tab-panel" id="tab-file">
+    <input type="file" class="focusable" id="txt-file" accept=".txt,.m3u,.m3u8" onchange="loadFromFile(event)">
+    <span class="hint">Suporta M3U e TXT.</span>
+</div>
+
+<div class="tab-panel" id="tab-bulk">
+    <input type="file" class="focusable" id="bulk-file" accept=".txt" onchange="loadBulkTXT(event)">
+    <span class="hint">TXT com múltiplas listas (uma por linha). Máx: <b>1000 listas</b>.</span>
+    <span class="bulk-counter" id="bulk-counter"></span>
+</div>
+
+<div class="tab-panel" id="tab-xtream">
+    <input type="text" class="focusable" id="xc-server" placeholder="Servidor (http://host:porta)" style="flex:1;min-width:180px;">
+    <input type="text" class="focusable" id="xc-user" placeholder="Usuário" style="width:120px;">
+    <input type="password" class="focusable" id="xc-pass" placeholder="Senha" style="width:120px;">
+    <button class="focusable" onclick="loadXtream()">Conectar</button>
+</div>
+
+<div class="tab-panel" id="tab-proxy">
+    <input type="text" class="focusable" id="proxy-url" placeholder="https://seu-worker.workers.dev/?url=" style="flex:1;min-width:250px;">
+    <button class="focusable" onclick="saveProxy()">Salvar</button>
+    <button class="focusable secondary" onclick="testProxy()">Testar</button>
+    <button class="focusable danger" onclick="clearProxy()">Remover</button>
+    <span class="hint warn">⚠️ Em HTTPS (GitHub Pages), streams HTTP SÓ funcionam com proxy HTTPS ativo. Sem proxy, o navegador bloqueia (Mixed Content).</span>
+</div>
+
+<main>
+    <aside id="sidebar">
+        <div class="content-tabs">
+            <button class="content-tab focusable active" data-content="live" onclick="switchContent('live')">📺 Ao Vivo</button>
+            <button class="content-tab focusable" data-content="vod" onclick="switchContent('vod')">🎬 Filmes</button>
+            <button class="content-tab focusable" data-content="series" onclick="switchContent('series')">📽️ Séries</button>
+        </div>
+        <div class="category-select">
+            <select class="focusable" id="category-filter" onchange="filterChannels()">
+                <option value="">Todas as Categorias</option>
+            </select>
+        </div>
+        <div id="channel-list" tabindex="0">
+            <div style="padding:20px; color:#64748b; text-align:center; font-size:0.85rem;">Carregue uma lista para começar</div>
+        </div>
+    </aside>
+
+    <div class="video-area">
+        <div id="video-container">
+            <video id="video" controls autoplay playsinline crossorigin="anonymous"></video>
+            <div id="status-overlay">Aguardando...</div>
+        </div>
+        <div class="controls">
+            <span id="current-channel" style="flex:1; color:#94a3b8;">Nenhum item selecionado</span>
+            <button class="fullscreen-btn focusable" onclick="toggleFullscreen()">⛶ Tela Cheia</button>
+            <span class="conn-badge"><span class="conn-dot"></span><span id="active-conns">0</span> conexões</span>
+        </div>
+    </div>
+</main>
+
+<div class="exit-fs-hint" id="exit-fs-hint">Pressione <b>BACK</b> ou <b>ESC</b> para sair</div>
+
+<div class="modal-overlay" id="bulk-modal">
+    <div class="modal-box">
+        <h2>📚 Processando Lote</h2>
+        <p id="bulk-modal-msg">Preparando...</p>
+        <div class="progress-bar"><div class="progress-fill" id="bulk-progress" style="width:0%"></div></div>
+        <div class="log" id="bulk-log"></div>
+        <button id="bulk-cancel-btn" class="danger focusable" onclick="cancelBulk()">Cancelar</button>
+        <button id="bulk-close-btn" class="secondary focusable" style="display:none;" onclick="closeBulkModal()">Fechar</button>
+    </div>
+</div>
+
+<script>
+// ============================================================
+// DETECÇÃO DE AMBIENTE (HTTPS vs HTTP)
+// ============================================================
+const IS_HTTPS = location.protocol === 'https:';
+
+// ============================================================
+// ARMAZENAMENTO INDEXEDDB
+// ============================================================
+class TVStorageManager {
+    constructor() { this.dbName = 'IPTV_Hero_TV_DB'; this.dbVersion = 1; this.db = null; }
+    async init() {
+        return new Promise((resolve, reject) => {
+            const req = indexedDB.open(this.dbName, this.dbVersion);
+            req.onerror = () => reject('Erro ao abrir IndexedDB');
+            req.onsuccess = (e) => { this.db = e.target.result; resolve(); };
+            req.onupgradeneeded = (e) => {
+                const db = e.target.result;
+                if (!db.objectStoreNames.contains('profiles'))  db.createObjectStore('profiles',  { keyPath: 'id' });
+                if (!db.objectStoreNames.contains('playlists')) db.createObjectStore('playlists', { keyPath: 'id' });
+                if (!db.objectStoreNames.contains('settings'))  db.createObjectStore('settings',  { keyPath: 'key' });
+            };
+        });
+    }
+    async saveItem(s, d) { return new Promise((res, rej) => { const tx = this.db.transaction([s], 'readwrite'); const r = tx.objectStore(s).put(d); r.onsuccess = () => res(); r.onerror = () => rej('Erro ao salvar'); }); }
+    async getItem(s, k)  { return new Promise((res) => { const tx = this.db.transaction([s], 'readonly'); const r = tx.objectStore(s).get(k); r.onsuccess = () => res(r.result || null); r.onerror = () => res(null); }); }
+    async getAll(s)      { return new Promise((res) => { const tx = this.db.transaction([s], 'readonly'); const r = tx.objectStore(s).getAll(); r.onsuccess = () => res(r.result || []); r.onerror = () => res([]); }); }
+    async deleteItem(s, k) { return new Promise((res) => { const tx = this.db.transaction([s], 'readwrite'); tx.objectStore(s).delete(k); tx.oncomplete = () => res(); }); }
+    async clearStore(s) { return new Promise((res) => { const tx = this.db.transaction([s], 'readwrite'); tx.objectStore(s).clear(); tx.oncomplete = () => res(); }); }
+}
+const tvDB = new TVStorageManager();
+
+// ============================================================
+// FULLSCREEN
+// ============================================================
+function toggleFullscreen() {
+    if (!document.fullscreenElement) {
+        const el = document.documentElement;
+        if (el.requestFullscreen) el.requestFullscreen().catch(() => {});
+        else if (el.webkitRequestFullscreen) el.webkitRequestFullscreen();
+        document.body.classList.add('video-fullscreen');
+        showFsHint();
+    } else exitFullscreen();
+}
+function exitFullscreen() {
+    if (document.exitFullscreen) document.exitFullscreen().catch(() => {});
+    else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+    document.body.classList.remove('video-fullscreen');
+}
+function showFsHint() {
+    const h = document.getElementById('exit-fs-hint');
+    h.classList.add('show');
+    setTimeout(() => h.classList.remove('show'), 3000);
+}
+document.addEventListener('fullscreenchange', () => {
+    if (!document.fullscreenElement) document.body.classList.remove('video-fullscreen');
+});
+
+// ============================================================
+// D-PAD
+// ============================================================
+function getFocusableElements() {
+    const sel = 'button, input, select, [tabindex]:not([tabindex="-1"]), .channel-item, .profile-item, .tab, .content-tab';
+    return Array.from(document.querySelectorAll(sel)).filter(el => {
+        if (el.disabled) return false;
+        if (el.offsetParent === null && el.tagName !== 'BODY') return false;
+        const st = getComputedStyle(el);
+        if (st.display === 'none' || st.visibility === 'hidden') return false;
+        if (el.id === 'channel-list') return false;
+        return true;
+    });
+}
+function focusElement(el) {
+    if (!el) return;
+    el.focus();
+    if (el.scrollIntoView) el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+}
+function moveFocus(dir) {
+    const list = getFocusableElements();
+    if (!list.length) return;
+    const cur = document.activeElement;
+    const idx = list.indexOf(cur);
+    if (idx === -1) { focusElement(list[0]); return; }
+    let next = idx;
+    if (dir === 'up') next = idx - 1;
+    else if (dir === 'down') next = idx + 1;
+    else if (dir === 'left') next = findNeighbor(list, cur, 'left');
+    else if (dir === 'right') next = findNeighbor(list, cur, 'right');
+    if (next < 0) next = 0;
+    if (next >= list.length) next = list.length - 1;
+    if (next !== idx) focusElement(list[next]);
+}
+function findNeighbor(list, cur, dir) {
+    const cr = cur.getBoundingClientRect();
+    const cx = cr.left + cr.width / 2, cy = cr.top + cr.height / 2;
+    let best = -1, bestD = Infinity;
+    list.forEach((el, i) => {
+        if (el === cur) return;
+        const r = el.getBoundingClientRect();
+        if (!r.width && !r.height) return;
+        const ex = r.left + r.width / 2, ey = r.top + r.height / 2;
+        if (dir === 'left' && ex >= cx - 10) return;
+        if (dir === 'right' && ex <= cx + 10) return;
+        const d = Math.abs(ex - cx) + Math.abs(ey - cy) * 2;
+        if (d < bestD) { bestD = d; best = i; }
+    });
+    return best;
+}
+document.addEventListener('keydown', (e) => {
+    if (document.body.classList.contains('video-fullscreen')) {
+        if (e.key === 'Escape' || e.key === 'Backspace' || e.keyCode === 4) { e.preventDefault(); exitFullscreen(); }
+        return;
+    }
+    const menu = document.getElementById('user-menu-panel');
+    if (menu.classList.contains('open') && (e.key === 'Escape' || e.key === 'Backspace')) {
+        e.preventDefault(); closeUserMenu(); focusElement(document.querySelector('.user-menu-btn')); return;
+    }
+    switch (e.key) {
+        case 'ArrowUp': e.preventDefault(); moveFocus('up'); break;
+        case 'ArrowDown': e.preventDefault(); moveFocus('down'); break;
+        case 'ArrowLeft': e.preventDefault(); moveFocus('left'); break;
+        case 'ArrowRight': e.preventDefault(); moveFocus('right'); break;
+        case 'Enter':
+            if (document.activeElement.classList.contains('channel-item') || document.activeElement.classList.contains('profile-item')) {
+                e.preventDefault(); document.activeElement.click();
+            }
+            break;
+        case 'Escape': case 'Backspace': e.preventDefault(); handleBack(); break;
+        case 'f': case 'F': if (!e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); toggleFullscreen(); } break;
+    }
+});
+function handleBack() {
+    if (document.fullscreenElement) { exitFullscreen(); return; }
+    if (document.getElementById('bulk-modal').classList.contains('open')) { closeBulkModal(); return; }
+    if (document.getElementById('user-menu-panel').classList.contains('open')) { closeUserMenu(); return; }
+    const first = document.querySelector('.channel-item');
+    if (first) focusElement(first);
+}
+
+// ============================================================
+// PROXY
+// ============================================================
+let PROXY_URL = '';
+
+async function loadProxySetting() {
+    const item = await tvDB.getItem('settings', 'proxy_url');
+    PROXY_URL = item ? item.value : '';
+    document.getElementById('proxy-url').value = PROXY_URL;
+    updateProxyIndicator();
+}
+
+/**
+ * Aplica o proxy. Suporta 2 formatos:
+ *   1) Worker com "?url=" no final (ex: https://meu.workers.dev/?url=)
+ *   2) Worker que espera o path direto (ex: https://meu.workers.dev/)
+ */
+function applyProxy(url) {
+    if (!PROXY_URL) return url;
+    // Se já está proxiado, não faz de novo
+    if (url.startsWith(PROXY_URL)) return url;
+    // Se o worker usa ?url=, aplica como query
+    if (PROXY_URL.includes('url=') || PROXY_URL.includes('?url')) {
+        return PROXY_URL + encodeURIComponent(url);
+    }
+    // Senão assume que o Worker aceita o path direto
+    return PROXY_URL.replace(/\/$/, '') + '/' + url;
+}
+
+function updateProxyIndicator() {
+    const el = document.getElementById('proxy-indicator');
+    if (!PROXY_URL) {
+        el.textContent = 'Proxy: desativado';
+        el.className = 'proxy-indicator focusable warning';
+    } else {
+        el.textContent = 'Proxy: ativo';
+        el.className = 'proxy-indicator focusable active';
+    }
+}
+
+async function saveProxy() {
+    const val = document.getElementById('proxy-url').value.trim();
+    if (val && !/^https?:\/\//i.test(val)) return alert('URL deve começar com http(s)://');
+    PROXY_URL = val;
+    if (val) {
+        await tvDB.saveItem('settings', { key: 'proxy_url', value: PROXY_URL });
+    } else {
+        await tvDB.deleteItem('settings', 'proxy_url');
+    }
+    updateProxyIndicator();
+    setStatus(PROXY_URL ? 'Proxy salvo.' : 'Proxy removido.', 'ok');
+}
+
+async function clearProxy() {
+    PROXY_URL = '';
+    await tvDB.deleteItem('settings', 'proxy_url');
+    document.getElementById('proxy-url').value = '';
+    updateProxyIndicator();
+    setStatus('Proxy removido.', 'ok');
+}
+
+async function testProxy() {
+    const url = document.getElementById('proxy-url').value.trim();
+    if (!url) return alert('Insira a URL do proxy.');
+    setStatus('Testando proxy...', 'warn');
+    try {
+        const testTarget = 'https://httpbin.org/get';
+        const proxied = url.includes('url=') ? url + encodeURIComponent(testTarget) : url.replace(/\/$/, '') + '/' + testTarget;
+        const resp = await fetch(proxied);
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const data = await resp.json();
+        setStatus('✅ Proxy OK! IP: ' + (data.origin || '?'), 'ok');
+    } catch (e) {
+        setStatus('❌ Proxy falhou: ' + e.message, 'error');
+    }
+}
+
+// ============================================================
+// HEROIS
+// ============================================================
+const HEROES = {
+    marvel: ['Homem de Ferro','Capitão América','Thor','Hulk','Viúva Negra','Homem-Aranha','Doutor Estranho','Pantera Negra','Capitã Marvel','Feiticeira Escarlate','Visão','Falcão','Soldado Invernal','Gavião Arqueiro','Star-Lord','Gamora','Rocket','Groot','Drax','Mantis','Shang-Chi','Ms. Marvel','Cavaleiro da Lua','Mulher-Hulk','Loki','Kate Bishop','Yelena','Sam Wilson'],
+    dc: ['Batman','Superman','Mulher-Maravilha','Flash','Aquaman','Ciborgue','Lanterna Verde','Arqueiro Verde','Canário Negro','Supergirl','Batwoman','Shazam','Adão Negro','Besouro Azul','Zatanna','Constantine','Asa Noturna','Estelar','Mutano','Ravena','Mulher-Gato','Arlequina','Pacificador','Caçador de Marte']
+};
+function generateHeroName() {
+    const univ = Math.random() > 0.5 ? 'marvel' : 'dc';
+    const list = HEROES[univ];
+    const base = list[Math.floor(Math.random() * list.length)];
+    return { name: `${base}_${Math.floor(Math.random() * 9000) + 1000}`, universe: univ, base };
+}
+
+// ============================================================
+// PERFIS
+// ============================================================
+let profiles = [];
+let activeProfileId = null;
+
+async function syncProfiles() {
+    profiles = await tvDB.getAll('profiles');
+    const s = await tvDB.getItem('settings', 'active_profile');
+    activeProfileId = s ? s.value : (profiles.length ? profiles[0].id : null);
+}
+async function saveProfiles() {
+    for (const p of profiles) await tvDB.saveItem('profiles', p);
+    if (activeProfileId) await tvDB.saveItem('settings', { key: 'active_profile', value: activeProfileId });
+    else await tvDB.deleteItem('settings', 'active_profile');
+}
+async function createProfile(data) {
+    const hero = generateHeroName();
+    const profile = {
+        id: 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6),
+        hero: hero.name, universe: hero.universe,
+        sourceType: data.sourceType, sourceLabel: data.sourceLabel,
+        server: data.server || null, user: data.user || null, pass: data.pass || null,
+        validity: data.validity || null, maxConnections: data.connections || null,
+        activeConnections: 0,
+        contentCounts: data.contentCounts || { live: 0, vod: 0, series: 0 },
+        bulkOrigin: data.bulkOrigin || false,
+        createdAt: Date.now(), lastUsed: Date.now()
+    };
+    profiles.push(profile);
+    activeProfileId = profile.id;
+    await tvDB.saveItem('profiles', profile);
+    await tvDB.saveItem('settings', { key: 'active_profile', value: activeProfileId });
+    renderProfileList(); updateCurrentProfileUI();
+    return profile;
+}
+async function deleteProfile(id) {
+    if (!confirm('Remover perfil?')) return;
+    profiles = profiles.filter(p => p.id !== id);
+    await tvDB.deleteItem('profiles', id);
+    if (activeProfileId === id) activeProfileId = profiles.length ? profiles[0].id : null;
+    await tvDB.saveItem('settings', { key: 'active_profile', value: activeProfileId });
+    renderProfileList(); updateCurrentProfileUI();
+}
+async function deleteAllProfiles() {
+    if (!confirm(`Remover TODOS os ${profiles.length} perfis?`)) return;
+    profiles = []; activeProfileId = null;
+    await tvDB.clearStore('profiles');
+    await tvDB.deleteItem('settings', 'active_profile');
+    renderProfileList(); updateCurrentProfileUI();
+}
+async function activateProfile(id) {
+    const p = profiles.find(x => x.id === id);
+    if (!p) return;
+    activeProfileId = id; p.lastUsed = Date.now();
+    await tvDB.saveItem('profiles', p);
+    await tvDB.saveItem('settings', { key: 'active_profile', value: activeProfileId });
+    renderProfileList(); updateCurrentProfileUI(); closeUserMenu();
+    if (p.sourceType === 'xtream' && p.server && p.user && p.pass) {
+        setStatus(`Reconectando ${p.hero}...`, 'warn');
+        loadXtreamData(p.server, p.user, p.pass, p.id).catch(e => setStatus('Erro: ' + e.message, 'error'));
+    } else {
+        const cached = await tvDB.getItem('playlists', p.id);
+        if (cached) {
+            currentPlaylist = cached.data;
+            setStatus(`Perfil ${p.hero} carregado.`, 'ok');
+            switchContent('live');
+        } else setStatus(`Perfil ${p.hero} ativado.`, 'ok');
+    }
+}
+function updateCurrentProfileUI() {
+    const a = profiles.find(p => p.id === activeProfileId);
+    document.getElementById('current-profile-name').textContent = a ? a.hero : 'Nenhum perfil';
+    document.getElementById('current-avatar').textContent = a ? (a.universe === 'marvel' ? '🦸' : '🦇') : '👤';
+    document.getElementById('active-conns').textContent = a ? a.activeConnections : 0;
+}
+function getValidityBadge(v) {
+    if (!v) return '<span class="profile-badge badge-unknown">Sem validade</span>';
+    const exp = new Date(v);
+    if (isNaN(exp.getTime())) return '<span class="profile-badge badge-unknown">Sem validade</span>';
+    const d = Math.ceil((exp - new Date()) / 86400000);
+    if (d < 0) return '<span class="profile-badge badge-expired">Expirado</span>';
+    if (d <= 7) return `<span class="profile-badge badge-expired">${d}d</span>`;
+    return `<span class="profile-badge badge-valid">Até ${exp.toLocaleDateString('pt-BR')}</span>`;
+}
+function renderProfileList() {
+    const body = document.getElementById('profile-list');
+    document.getElementById('profile-count').textContent = profiles.length + ' perfil' + (profiles.length !== 1 ? 's' : '');
+    if (!profiles.length) { body.innerHTML = '<div class="empty-profiles">Nenhum perfil.</div>'; return; }
+    body.innerHTML = '';
+    [...profiles].sort((a, b) => b.lastUsed - a.lastUsed).slice(0, 200).forEach(p => {
+        const div = document.createElement('div');
+        div.className = 'profile-item focusable' + (p.id === activeProfileId ? ' active' : '');
+        div.tabIndex = 0;
+        div.onclick = (e) => { if (!e.target.closest('button')) activateProfile(p.id); };
+        const conn = p.maxConnections ? `${p.activeConnections}/${p.maxConnections}` : `${p.activeConnections}`;
+        div.innerHTML = `
+            <div class="profile-top">
+                <span class="profile-hero">${p.universe === 'marvel' ? '🦸' : '🦇'} ${p.hero}</span>
+                <span>${p.bulkOrigin ? '<span class="profile-badge badge-bulk">LOTE</span> ' : ''}${getValidityBadge(p.validity)}</span>
+            </div>
+            <div class="profile-meta">
+                <span>📡 ${p.sourceType.toUpperCase()}</span>
+                <span>🎬 ${p.contentCounts.live}</span>
+                <span>🎥 ${p.contentCounts.vod}</span>
+                <span>📽️ ${p.contentCounts.series}</span>
+                <span>🔌 ${conn}</span>
+            </div>
+            <div class="profile-actions">
+                <button class="focusable" onclick="activateProfile('${p.id}'); event.stopPropagation();">Ativar</button>
+                <button class="danger focusable" onclick="deleteProfile('${p.id}'); event.stopPropagation();">Excluir</button>
+            </div>`;
+        body.appendChild(div);
+    });
+}
+function toggleUserMenu(event) {
+    event.stopPropagation();
+    const p = document.getElementById('user-menu-panel');
+    p.classList.toggle('open');
+    if (p.classList.contains('open')) {
+        renderProfileList();
+        setTimeout(() => { const f = p.querySelector('.focusable'); if (f) focusElement(f); }, 50);
+    }
+}
+function closeUserMenu() { document.getElementById('user-menu-panel').classList.remove('open'); }
+document.addEventListener('click', (e) => {
+    const p = document.getElementById('user-menu-panel');
+    const b = document.querySelector('.user-menu-btn');
+    if (p.classList.contains('open') && !p.contains(e.target) && !b.contains(e.target)) p.classList.remove('open');
+});
+
+// ============================================================
+// EXPORT / BULK
+// ============================================================
+function exportProfilesTXT() {
+    if (!profiles.length) return alert('Sem perfis.');
+    const lines = ['# IPTV Hero Pro Profiles'];
+    profiles.forEach(p => {
+        lines.push([p.sourceType, p.sourceLabel || '', p.server || '', p.user || '', p.pass || '',
+            p.validity || '', p.maxConnections || '', p.hero,
+            p.contentCounts.live, p.contentCounts.vod, p.contentCounts.series].join('|'));
+    });
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'iptv_hero_profiles_' + new Date().toISOString().slice(0, 10) + '.txt';
+    a.click();
+    URL.revokeObjectURL(a.href);
+}
+let bulkCancelled = false;
+function loadBulkTXT(event) {
+    const file = event.target.files[0]; if (!file) return;
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+        const lines = e.target.result.split(/\r?\n/).map(l => l.trim()).filter(l => l && !l.startsWith('#'));
+        if (!lines.length) return alert('Vazio.');
+        const lists = lines.length > 1000 ? lines.slice(0, 1000) : lines;
+        document.getElementById('bulk-counter').textContent = `${lists.length} listas`;
+        if (!confirm(`Processar ${lists.length} listas?`)) { event.target.value = ''; return; }
+        await processBulk(lists);
+        event.target.value = '';
+    };
+    reader.readAsText(file);
+}
+async function processBulk(lists) {
+    bulkCancelled = false;
+    const modal = document.getElementById('bulk-modal');
+    const msg = document.getElementById('bulk-modal-msg');
+    const prog = document.getElementById('bulk-progress');
+    const log = document.getElementById('bulk-log');
+    const cancelBtn = document.getElementById('bulk-cancel-btn');
+    const closeBtn = document.getElementById('bulk-close-btn');
+    modal.classList.add('open');
+    cancelBtn.style.display = 'block'; closeBtn.style.display = 'none';
+    log.innerHTML = ''; prog.style.width = '0%';
+    setTimeout(() => focusElement(cancelBtn), 100);
+    let success = 0, failed = 0, skipped = 0;
+    const total = lists.length;
+    for (let i = 0; i < total; i++) {
+        if (bulkCancelled) { skipped = total - i; logLine(log, `⏹️ Cancelado. ${skipped} ignoradas.`); break; }
+        msg.textContent = `${i + 1}/${total}: ${lists[i].substring(0, 60)}...`;
+        prog.style.width = ((i + 1) / total * 100) + '%';
+        try {
+            const r = await processOneBulkLine(lists[i]);
+            if (r.ok) { success++; logLine(log, `✅ [${i + 1}] ${r.hero} (${r.type}) - ${r.count}`); }
+            else { failed++; logLine(log, `⚠️ [${i + 1}] ${r.error}`); }
+        } catch (e) { failed++; logLine(log, `❌ [${i + 1}] ${e.message}`); }
+        if ((i + 1) % 10 === 0) { await saveProfiles(); renderProfileList(); }
+    }
+    await saveProfiles(); renderProfileList(); updateCurrentProfileUI();
+    msg.textContent = `Concluído! ✅ ${success} | ❌ ${failed} | ⏹️ ${skipped}`;
+    cancelBtn.style.display = 'none'; closeBtn.style.display = 'block';
+    closeBtn.textContent = `Fechar (${success} criados)`;
+    setTimeout(() => focusElement(closeBtn), 100);
+}
+function cancelBulk() { bulkCancelled = true; }
+function closeBulkModal() { document.getElementById('bulk-modal').classList.remove('open'); document.getElementById('bulk-log').innerHTML = ''; }
+function logLine(el, text) { const d = document.createElement('div'); d.textContent = text; el.appendChild(d); el.scrollTop = el.scrollHeight; }
+
+async function processOneBulkLine(line) {
+    const creds = detectXtreamPure(line);
+    if (creds) return await bulkLoadXtream(creds.server, creds.username, creds.password);
+    if (/^https?:\/\//i.test(line)) {
+        try {
+            const resp = await fetch(applyProxy(line));
+            if (!resp.ok) throw new Error('HTTP ' + resp.status);
+            const text = await resp.text();
+            if (text.includes('#EXTM3U') || text.includes('#EXTINF')) {
+                const ch = parseM3U(text);
+                if (!ch.length) throw new Error('M3U vazia');
+                const p = await createProfile({ sourceType: 'm3u', sourceLabel: line.substring(0, 100), contentCounts: { live: ch.length, vod: 0, series: 0 }, bulkOrigin: true });
+                await tvDB.saveItem('playlists', { id: p.id, data: { live: ch, vod: [], series: [], sourceType: 'm3u' } });
+                return { ok: true, hero: p.hero, type: 'M3U', count: ch.length };
+            }
+            const ch = parseTXT(text);
+            if (ch.length) {
+                const p = await createProfile({ sourceType: 'txt', sourceLabel: line.substring(0, 100), contentCounts: { live: ch.length, vod: 0, series: 0 }, bulkOrigin: true });
+                await tvDB.saveItem('playlists', { id: p.id, data: { live: ch, vod: [], series: [], sourceType: 'txt' } });
+                return { ok: true, hero: p.hero, type: 'TXT', count: ch.length };
+            }
+            throw new Error('Formato desconhecido');
+        } catch (e) { return { ok: false, error: e.message }; }
+    }
+    const inline = parseInlineChannel(line);
+    if (inline) {
+        const p = await createProfile({ sourceType: 'txt', sourceLabel: inline.name, contentCounts: { live: 1, vod: 0, series: 0 }, bulkOrigin: true });
+        await tvDB.saveItem('playlists', { id: p.id, data: { live: [{ name: inline.name, url: inline.url, group: 'TXT' }], vod: [], series: [], sourceType: 'txt' } });
+        return { ok: true, hero: p.hero, type: 'inline', count: 1 };
+    }
+    return { ok: false, error: 'Não reconhecido' };
+}
+async function bulkLoadXtream(server, user, pass) {
+    const base = `${server.replace(/\/$/, '')}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`;
+    const auth = await (await fetch(applyProxy(base))).json();
+    if (!auth.user_info || auth.user_info.auth === 0) throw new Error('Credenciais inválidas');
+    let validity = null;
+    if (auth.user_info.exp_date) { const x = parseInt(auth.user_info.exp_date); if (x > 0) validity = new Date(x * 1000).toISOString(); }
+    let maxC = auth.user_info.max_connections ? parseInt(auth.user_info.max_connections) : null;
+    let liveC = 0, vodC = 0, serC = 0;
+    try { const d = await (await fetch(applyProxy(base + '&action=get_live_streams'))).json(); liveC = Array.isArray(d) ? d.length : 0; } catch (_) {}
+    try { const d = await (await fetch(applyProxy(base + '&action=get_vod_streams'))).json(); vodC = Array.isArray(d) ? d.length : 0; } catch (_) {}
+    try { const d = await (await fetch(applyProxy(base + '&action=get_series'))).json(); serC = Array.isArray(d) ? d.length : 0; } catch (_) {}
+    const p = await createProfile({ sourceType: 'xtream', sourceLabel: server, server, user, pass, validity, connections: maxC, contentCounts: { live: liveC, vod: vodC, series: serC }, bulkOrigin: true });
+    return { ok: true, hero: p.hero, type: 'XTREAM', count: liveC + vodC + serC };
+}
+
+// ============================================================
+// STATE
+// ============================================================
+let currentPlaylist = null, hls = null, currentContent = 'live';
+const video = document.getElementById('video');
+const statusEl = document.getElementById('status-overlay');
+const listEl = document.getElementById('channel-list');
+const categoryFilter = document.getElementById('category-filter');
+
+function setStatus(text, type) {
+    statusEl.textContent = text;
+    statusEl.className = '';
+    if (type === 'error') statusEl.classList.add('error');
+    else if (type === 'warn') statusEl.classList.add('warn');
+    else if (type === 'ok') statusEl.classList.add('ok');
+}
+
+function switchTab(tabId) {
+    document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabId));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === tabId));
+}
+
+// ============================================================
+// PARSERS
+// ============================================================
+function parseM3U(text) {
+    const lines = text.split(/\r?\n/), ch = [];
+    let info = null;
+    for (let l of lines) {
+        l = l.trim(); if (!l) continue;
+        if (l.startsWith('#EXTINF:')) {
+            const n = l.match(/,(.*)$/), g = l.match(/group-title="([^"]*)"/);
+            info = { name: n ? n[1].trim() : 'Canal', group: g ? g[1] : 'Geral', url: null };
+        } else if (!l.startsWith('#') && info) {
+            info.url = l; ch.push(info); info = null;
+        }
+    }
+    return ch;
+}
+function parseTXT(text) {
+    const lines = text.split(/\r?\n/), ch = [];
+    for (let l of lines) {
+        l = l.trim(); if (!l || l.startsWith('#')) continue;
+        const inline = parseInlineChannel(l);
+        if (inline) ch.push({ name: inline.name, url: inline.url, group: 'TXT' });
+    }
+    return ch;
+}
+function parseInlineChannel(line) {
+    if (line.includes(',')) {
+        const parts = line.split(',');
+        if (/^https?:\/\//i.test(parts[0])) return { url: parts[0].trim(), name: parts[1]?.trim() || 'Canal' };
+        if (/^https?:\/\//i.test(parts[1] || '')) return { name: parts[0].trim(), url: parts[1].trim() };
+    } else if (/^https?:\/\//i.test(line)) return { name: 'Canal', url: line };
+    return null;
+}
+function detectXtreamPure(text) {
+    const pats = [
+        /https?:\/\/[^\s]+\/get\.php\?[^\s]*username=([^&\s]+)[^\s]*password=([^&\s]+)/i,
+        /https?:\/\/[^\s]+\/player_api\.php\?[^\s]*username=([^&\s]+)[^\s]*password=([^&\s]+)/i
+    ];
+    for (const p of pats) {
+        const m = text.match(p);
+        if (m) { const h = text.match(/(https?:\/\/[^\/\s]+)/); if (h) return { server: h[1], username: m[1], password: m[2] }; }
+    }
+    return null;
+}
+
+// ============================================================
+// XTREAM
+// ============================================================
+async function loadXtreamData(server, user, pass, existingProfileId) {
+    const base = `${server.replace(/\/$/, '')}/player_api.php?username=${encodeURIComponent(user)}&password=${encodeURIComponent(pass)}`;
+    setStatus('Autenticando...', 'warn');
+    const auth = await (await fetch(applyProxy(base))).json();
+    if (!auth.user_info || auth.user_info.auth === 0) throw new Error('Credenciais inválidas');
+    let validity = null;
+    if (auth.user_info.exp_date) { const x = parseInt(auth.user_info.exp_date); if (x > 0) validity = new Date(x * 1000).toISOString(); }
+    let maxC = auth.user_info.max_connections ? parseInt(auth.user_info.max_connections) : null;
+    let activeC = auth.user_info.active_cons ? parseInt(auth.user_info.active_cons) : 0;
+
+    const live = [], vod = [], series = [];
+    setStatus('Carregando Live...', 'warn');
+    try {
+        const [c, s] = await Promise.all([
+            fetch(applyProxy(base + '&action=get_live_categories')).then(r => r.json()),
+            fetch(applyProxy(base + '&action=get_live_streams')).then(r => r.json())
+        ]);
+        const cm = {}; (Array.isArray(c) ? c : []).forEach(x => cm[x.category_id] = x.category_name);
+        (Array.isArray(s) ? s : []).forEach(x => live.push({ name: x.name || 'Canal', group: cm[x.category_id] || 'Geral', url: `${server}/live/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${x.stream_id}.m3u8`, type: 'live', id: x.stream_id }));
+    } catch (_) {}
+    setStatus('Carregando Filmes...', 'warn');
+    try {
+        const [c, s] = await Promise.all([
+            fetch(applyProxy(base + '&action=get_vod_categories')).then(r => r.json()),
+            fetch(applyProxy(base + '&action=get_vod_streams')).then(r => r.json())
+        ]);
+        const cm = {}; (Array.isArray(c) ? c : []).forEach(x => cm[x.category_id] = x.category_name);
+        (Array.isArray(s) ? s : []).forEach(x => vod.push({ name: x.name || 'Filme', group: cm[x.category_id] || 'Geral', url: `${server}/movie/${encodeURIComponent(user)}/${encodeURIComponent(pass)}/${x.stream_id}.${x.container_extension || 'mp4'}`, type: 'vod', id: x.stream_id }));
+    } catch (_) {}
+    setStatus('Carregando Séries...', 'warn');
+    try {
+        const [c, s] = await Promise.all([
+            fetch(applyProxy(base + '&action=get_series_categories')).then(r => r.json()),
+            fetch(applyProxy(base + '&action=get_series')).then(r => r.json())
+        ]);
+        const cm = {}; (Array.isArray(c) ? c : []).forEach(x => cm[x.category_id] = x.category_name);
+        (Array.isArray(s) ? s : []).forEach(x => series.push({ name: x.name || 'Série', group: cm[x.category_id] || 'Geral', url: null, type: 'series', id: x.series_id }));
+    } catch (_) {}
+
+    currentPlaylist = { live, vod, series, sourceType: 'xtream', server, user, pass };
+
+    if (existingProfileId) {
+        const p = profiles.find(x => x.id === existingProfileId);
+        if (p) {
+            p.validity = validity; p.maxConnections = maxC; p.activeConnections = activeC;
+            p.contentCounts = { live: live.length, vod: vod.length, series: series.length };
+            p.lastUsed = Date.now();
+            saveProfiles(); renderProfileList(); updateCurrentProfileUI();
+        }
+    } else {
+        const p = await createProfile({ sourceType: 'xtream', sourceLabel: server, server, user, pass, validity, connections: maxC, contentCounts: { live: live.length, vod: vod.length, series: series.length } });
+        p.activeConnections = activeC;
+        await tvDB.saveItem('profiles', p);
+        renderProfileList(); updateCurrentProfileUI();
+    }
+    setStatus(`Xtream | Live:${live.length} VOD:${vod.length} Séries:${series.length}`, 'ok');
+    switchContent('live');
+}
+
+async function loadXtream() {
+    const s = document.getElementById('xc-server').value.trim().replace(/\/$/, '');
+    const u = document.getElementById('xc-user').value.trim();
+    const p = document.getElementById('xc-pass').value.trim();
+    if (!s || !u || !p) return alert('Preencha tudo.');
+    if (IS_HTTPS && s.startsWith('http://') && !PROXY_URL) {
+        setStatus('⚠️ Servidor HTTP em página HTTPS. Configure o proxy!', 'error');
+        if (!confirm('Servidor é HTTP mas a página é HTTPS. Sem proxy, o navegador vai bloquear. Deseja configurar o proxy agora?')) return;
+        switchTab('tab-proxy');
+        return;
+    }
+    try { await loadXtreamData(s, u, p); }
+    catch (e) { setStatus('Erro: ' + e.message, 'error'); alert('Falha: ' + e.message); }
+}
+
+// ============================================================
+// LOADERS DE ARQUIVO
+// ============================================================
+async function processParsedTextFile(text, fileName) {
+    setStatus('Analisando...', 'warn');
+    const creds = detectXtreamPure(text);
+    if (creds && confirm(`Xtream Pure detectado! Servidor: ${creds.server}. Carregar?`)) {
+        try { await loadXtreamData(creds.server, creds.username, creds.password); return; }
+        catch (err) { alert('Falha: ' + err.message); }
+    }
+    const ch = (text.includes('#EXTM3U') || text.includes('#EXTINF')) ? parseM3U(text) : parseTXT(text);
+    if (!ch.length) return alert('Nenhum canal.');
+    currentPlaylist = { live: ch, vod: [], series: [], sourceType: 'm3u' };
+    const prof = await createProfile({ sourceType: 'm3u', sourceLabel: fileName, contentCounts: { live: ch.length, vod: 0, series: 0 } });
+    await tvDB.saveItem('playlists', { id: prof.id, data: currentPlaylist });
+    setStatus(`Salvo: ${ch.length} canais`, 'ok');
+    switchContent('live');
+}
+function loadFromFile(event) {
+    const file = event.target.files[0]; if (!file) return;
+    const r = new FileReader();
+    r.onload = async (e) => { await processParsedTextFile(e.target.result, file.name); };
+    r.readAsText(file);
+    event.target.value = '';
+}
+async function loadFromUrl() {
+    const url = document.getElementById('m3u-url').value.trim();
+    if (!url) return alert('Insira URL.');
+    if (IS_HTTPS && url.startsWith('http://') && !PROXY_URL) {
+        setStatus('⚠️ URL HTTP em página HTTPS. Configure o proxy!', 'error');
+        if (!confirm('A URL é HTTP mas a página é HTTPS. Sem proxy, o navegador vai bloquear. Configurar proxy agora?')) return;
+        switchTab('tab-proxy');
+        return;
+    }
+    setStatus('Baixando...', 'warn');
+    if (url.includes('get.php') || url.includes('player_api.php')) {
+        const creds = detectXtreamPure(url);
+        if (creds && confirm('Xtream Pure detectado. Carregar completo?')) {
+            try { await loadXtreamData(creds.server, creds.username, creds.password); return; }
+            catch (e) { alert('Erro: ' + e.message); }
+        }
+    }
+    try {
+        const resp = await fetch(applyProxy(url));
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        const text = await resp.text();
+        const creds = detectXtreamPure(text);
+        if (creds && confirm('Xtream Pure no conteúdo. Carregar?')) {
+            try { await loadXtreamData(creds.server, creds.username, creds.password); return; }
+            catch (e) { alert('Erro: ' + e.message); }
+        }
+        const ch = (text.includes('#EXTM3U') || text.includes('#EXTINF')) ? parseM3U(text) : parseTXT(text);
+        if (!ch.length) throw new Error('Nenhum canal');
+        currentPlaylist = { live: ch, vod: [], series: [], sourceType: 'm3u' };
+        const prof = await createProfile({ sourceType: 'm3u', sourceLabel: url.substring(0, 80), contentCounts: { live: ch.length, vod: 0, series: 0 } });
+        await tvDB.saveItem('playlists', { id: prof.id, data: currentPlaylist });
+        setStatus(`Salvo: ${ch.length} canais`, 'ok');
+        switchContent('live');
+    } catch (e) { setStatus('Erro: ' + e.message, 'error'); alert('Falha: ' + e.message); }
+}
+
+// ============================================================
+// CONTEÚDO
+// ============================================================
+function switchContent(type) {
+    currentContent = type;
+    document.querySelectorAll('.content-tab').forEach(t => t.classList.toggle('active', t.dataset.content === type));
+    populateCategories(); renderContentList();
+}
+function populateCategories() {
+    if (!currentPlaylist) return;
+    const items = currentPlaylist[currentContent] || [];
+    const cats = [...new Set(items.map(i => i.group))].sort();
+    categoryFilter.innerHTML = '<option value="">Todas</option>';
+    cats.forEach(c => { const o = document.createElement('option'); o.value = c; o.textContent = c; categoryFilter.appendChild(o); });
+}
+function filterChannels() { renderContentList(); }
+function renderContentList() {
+    if (!currentPlaylist) return;
+    const items = currentPlaylist[currentContent] || [];
+    const filter = categoryFilter.value;
+    const filtered = filter ? items.filter(i => i.group === filter) : items;
+    listEl.innerHTML = '';
+    if (!filtered.length) {
+        listEl.innerHTML = '<div style="padding:20px;color:#64748b;text-align:center;font-size:0.85rem;">Nenhum item.</div>';
+        return;
+    }
+    filtered.forEach(item => {
+        const div = document.createElement('div');
+        div.className = 'channel-item focusable';
+        div.tabIndex = 0;
+        div.innerHTML = `<span>${item.name}</span><span class="badge">${item.group || 'Geral'}</span>`;
+        div.onclick = () => playItem(item, div);
+        listEl.appendChild(div);
+    });
+    if (filtered.length && document.activeElement === listEl) focusElement(listEl.querySelector('.channel-item'));
+}
+
+// ============================================================
+// PLAYER UNIFICADO COM DIAGNÓSTICO
+// ============================================================
+async function playItem(item, el) {
+    document.querySelectorAll('.channel-item').forEach(e => e.classList.remove('active'));
+    if (el) el.classList.add('active');
+    document.getElementById('current-channel').textContent = item.name;
+    setStatus('Carregando: ' + item.name, 'warn');
+
+    if (hls) { try { hls.destroy(); } catch (_) {} hls = null; }
+    if (window._dashPlayer) { try { window._dashPlayer.reset(); } catch (_) {} window._dashPlayer = null; }
+    try { video.pause(); } catch (_) {}
+    video.removeAttribute('src');
+    while (video.firstChild) video.removeChild(video.firstChild);
+    video.load();
+
+    let url = item.url;
+    if (item.type === 'series' && !url) {
+        setStatus('Buscando episódios...', 'warn');
+        try {
+            const base = `${currentPlaylist.server}/player_api.php?username=${encodeURIComponent(currentPlaylist.user)}&password=${encodeURIComponent(currentPlaylist.pass)}&action=get_series_info&series_id=${item.id}`;
+            const data = await (await fetch(applyProxy(base))).json();
+            let ep = null;
+            if (data.episodes) for (const s in data.episodes) {
+                const arr = data.episodes[s];
+                if (arr && arr.length) { ep = arr[0]; break; }
+            }
+            if (!ep) throw new Error('Sem episódios');
+            url = `${currentPlaylist.server}/series/${encodeURIComponent(currentPlaylist.user)}/${encodeURIComponent(currentPlaylist.pass)}/${ep.id}.${ep.container_extension || 'mp4'}`;
+        } catch (e) { setStatus('Erro: ' + e.message, 'error'); return; }
+    }
+    if (!url) { setStatus('URL indisponível', 'error'); return; }
+
+    // ========================================================
+    // DIAGNÓSTICO DE MIXED CONTENT
+    // ========================================================
+    if (IS_HTTPS && url.startsWith('http://')) {
+        if (!PROXY_URL) {
+            setStatus('🚫 BLOQUEADO: stream HTTP em página HTTPS. Ative o Proxy.', 'error');
+            if (confirm('O stream é HTTP mas a página é HTTPS. O navegador VAI bloquear (Mixed Content).\n\nDeseja configurar o proxy agora?')) {
+                switchTab('tab-proxy');
+            }
+            return;
+        }
+        // Tem proxy: aplica
+        setStatus('Via proxy HTTPS → HTTP...', 'warn');
+    }
+
+    const finalUrl = applyProxy(url);
+
+    if (!window.Hls || !Hls.isSupported()) {
+        setStatus('hls.js indisponível — usando player nativo', 'warn');
+    }
+
+    const isM3U8 = /\.m3u8(\?|$)/i.test(url);
+    const isMPD  = /\.mpd(\?|$)/i.test(url);
+    const isMP4  = /\.(mp4|mkv|webm|avi|mov)(\?|$)/i.test(url);
+
+    const p = profiles.find(x => x.id === activeProfileId);
+    if (p) {
+        p.activeConnections = Math.min((p.maxConnections || 99), p.activeConnections + 1);
+        saveProfiles(); updateCurrentProfileUI(); renderProfileList();
+    }
+
+    // HLS
+    if (isM3U8 || (!isMPD && !isMP4 && window.Hls && Hls.isSupported() && !video.canPlayType('application/vnd.apple.mpegurl'))) {
+        if (window.Hls && Hls.isSupported()) {
+            try {
+                hls = new Hls({
+                    enableWorker: true,
+                    lowLatencyMode: true,
+                    backBufferLength: 90,
+                    xhrSetup: function (xhr) {
+                        // Garante CORS quando possível
+                        xhr.withCredentials = false;
+                    }
+                });
+                hls.loadSource(finalUrl);
+                hls.attachMedia(video);
+                hls.on(Hls.Events.MANIFEST_PARSED, () => {
+                    video.play().catch(() => {});
+                    setStatus('Reproduzindo (HLS): ' + item.name, 'ok');
+                });
+                hls.on(Hls.Events.ERROR, (_, d) => {
+                    if (!d.fatal) return;
+                    let msg = 'Erro HLS: ' + d.type;
+                    if (d.details === Hls.ErrorDetails.MANIFEST_LOAD_ERROR ||
+                        d.details === Hls.ErrorDetails.MANIFEST_LOAD_TIMEOUT) {
+                        msg = '❌ Não foi possível baixar o .m3u8. Verifique: CORS, Mixed Content, ou token expirado.';
+                    } else if (d.details === Hls.ErrorDetails.MANIFEST_PARSING_ERROR) {
+                        msg = '❌ Manifesto inválido. O servidor devolveu algo que não é M3U8.';
+                    } else if (d.details === Hls.ErrorDetails.LEVEL_LOAD_ERROR) {
+                        msg = '❌ Falha ao carregar segmento (.ts). Servidor recusou (403/404?).';
+                    }
+                    setStatus(msg, 'error');
+                    try { hls.destroy(); } catch (_) {}
+                    hls = null;
+                    // Tenta nativo como último recurso
+                    video.src = finalUrl;
+                    video.play().catch(() => {});
+                });
+                return;
+            } catch (err) {
+                console.warn('HLS init falhou:', err);
+            }
+        }
+    }
+
+    // DASH
+    if (isMPD && window.dashjs && dashjs.MediaPlayer) {
+        try {
+            const player = dashjs.MediaPlayer().create();
+            player.initialize(video, finalUrl, true);
+            window._dashPlayer = player;
+            player.on('canPlay', () => { video.play().catch(() => {}); setStatus('Reproduzindo (DASH): ' + item.name, 'ok'); });
+            player.on('error', (e) => setStatus('Erro DASH: ' + (e.error?.message || 'desconhecido'), 'error'));
+            return;
+        } catch (err) { console.warn('DASH falhou:', err); }
+    }
+
+    // Nativo
+    video.src = finalUrl;
+    video.play().catch(() => {});
+    setStatus('Reproduzindo (nativo): ' + item.name, 'ok');
+}
+
+// ============================================================
+// INICIALIZAÇÃO
+// ============================================================
+window.addEventListener('load', async () => {
+    try {
+        await tvDB.init();
+        await loadProxySetting();
+        await syncProfiles();
+        renderProfileList();
+        updateCurrentProfileUI();
+        if (activeProfileId) {
+            const cached = await tvDB.getItem('playlists', activeProfileId);
+            if (cached) { currentPlaylist = cached.data; switchContent('live'); }
+        }
+        let msg = 'Pronto. ';
+        if (IS_HTTPS) msg += '⚠️ Página HTTPS: streams HTTP exigem proxy ativo (aba Proxy).';
+        else msg += 'Página HTTP: streams HTTP funcionam direto.';
+        setStatus(msg, 'ok');
+    } catch (e) {
+        setStatus('Erro ao inicializar IndexedDB', 'error');
+        console.error(e);
+    }
+});
+</script>
+</body>
+</html>
